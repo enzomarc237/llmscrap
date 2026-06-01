@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    llmscrap_scaffold_lib::run()
+    llmscrap_lib::run()
 }

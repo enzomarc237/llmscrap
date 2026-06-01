@@ -22,25 +22,43 @@ pub struct ScrapeResult {
 /// Invoke the bundled Python CLI to scrape an index URL.
 #[tauri::command]
 async fn scrape_index(app: tauri::AppHandle, opts: ScrapeOptions) -> Result<ScrapeResult, String> {
-    let python = resolve_python(&app)?;
     let formats: Vec<String> = opts.formats.iter().flat_map(|f| vec!["--format".into(), f.clone()]).collect();
 
-    let mut args = vec![
-        "-m".into(), "llmscrap".into(),
+    let mut cli_args = vec![
         opts.url.clone(),
         "-o".into(), opts.output_dir.clone(),
         "--workers".into(), opts.workers.to_string(),
         "--timeout".into(), opts.timeout.to_string(),
     ];
-    args.extend(formats);
+    cli_args.extend(formats);
 
-    let output = app
-        .shell()
-        .command(&python)
-        .args(&args)
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
+    let output = if let Ok(sidecar_cmd) = app.shell().sidecar("llmscrap-cli") {
+        sidecar_cmd
+            .args(&cli_args)
+            .output()
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        let python = resolve_python(&app)?;
+        let mut python_args = vec!["-m".into(), "llmscrap".into()];
+        python_args.extend(cli_args);
+
+        let mut command = app.shell().command(&python);
+        if let Some(py_root) = resolve_python_module_root(&app) {
+            let py_root = py_root.to_string_lossy().into_owned();
+            let pythonpath = match std::env::var("PYTHONPATH") {
+                Ok(existing) if !existing.trim().is_empty() => format!("{py_root};{existing}"),
+                _ => py_root,
+            };
+            command = command.env("PYTHONPATH", pythonpath);
+        }
+
+        command
+            .args(&python_args)
+            .output()
+            .await
+            .map_err(|e| e.to_string())?
+    };
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -94,6 +112,39 @@ fn resolve_python(app: &tauri::AppHandle) -> Result<String, String> {
 
     // Fall back to system Python
     Ok("python".into())
+}
+
+/// Resolve the local folder that contains the `llmscrap` Python package.
+fn resolve_python_module_root(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("python"));
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("..").join("..").join("..").join("python"));
+            candidates.push(
+                dir.join("..")
+                    .join("..")
+                    .join("..")
+                    .join("..")
+                    .join("python"),
+            );
+        }
+    }
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("python"));
+    }
+
+    candidates.into_iter().find(|candidate| {
+        candidate
+            .join("llmscrap")
+            .join("__main__.py")
+            .exists()
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

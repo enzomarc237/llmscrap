@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python sidecar build artifacts
+python/.venv-sidecar/
+python/build-sidecar/
+python/dist-sidecar/
+python/_sidecar_entry.py
+
+# Tauri sidecar binary output
+src-tauri/binaries/*.exe

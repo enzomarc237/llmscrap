@@ -1,7 +1,24 @@
-# Tauri + React + Typescript
+# llmscrap desktop app
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Tauri desktop UI for the `llmscrap` Python scraper.
 
-## Recommended IDE Setup
+## Development
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+```powershell
+npm install
+npm run tauri dev
+```
+
+## Build (self-contained scraper sidecar)
+
+`tauri build` now generates and bundles a Windows sidecar executable for the scraper (`llmscrap-cli`), so end users do not need Python installed.
+
+```powershell
+npx tauri build --no-bundle
+```
+
+You can also build the sidecar independently:
+
+```powershell
+npm run build:sidecar
+```

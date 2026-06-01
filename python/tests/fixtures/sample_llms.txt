@@ -1,0 +1,18 @@
+# Qoder Docs
+
+## Docs
+
+- [Introduction](https://docs.qoder.com/index.md): Getting started with Qoder.
+- [Quick Start](https://docs.qoder.com/quick-start.md): Install and run your first session.
+- [Credits](https://docs.qoder.com/Credits.md)
+
+## User Guide
+
+- [Agent Mode](https://docs.qoder.com/user-guide/chat/agent.md): Run autonomous agents.
+- [Ask Mode](https://docs.qoder.com/user-guide/chat/ask.md): Ask questions about your code.
+- [Memory](https://docs.qoder.com/user-guide/chat/memory.md): Persistent AI memory.
+
+## Optional
+
+- [Website](https://qoder.com)
+- [Forum](https://forum.qoder.com)

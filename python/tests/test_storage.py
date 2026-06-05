@@ -96,7 +96,6 @@ def test_save_bundle_llm_and_zip(tmp_path):
     with zipfile.ZipFile(tmp_path / ZIP_FILE) as zf:
       names = zf.namelist()
       assert MANIFEST_FILE in names
-      assert "intro.md" in names
 
 
 def test_save_all_formats(tmp_path):

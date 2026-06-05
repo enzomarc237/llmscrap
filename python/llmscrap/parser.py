@@ -145,7 +145,8 @@ def _extract_from_text(text: str, base_url: str) -> List[DocLink]:
                 abs_url = resolve_url(base_url, match.group(0))
                 if is_doc_url(abs_url) and abs_url not in seen:
                     seen.add(abs_url)
-                    title = urlparse(abs_url).path.split("/")[-1] or "document"
+                    parsed = urlparse(abs_url)
+                    title = parsed.path.split("/")[-1] or parsed.netloc
                     links.append(DocLink(title=title, url=abs_url, section=current_section))
 
     return links

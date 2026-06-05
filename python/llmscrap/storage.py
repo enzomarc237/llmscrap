@@ -136,6 +136,7 @@ def _markdown_to_html(markdown: str) -> str:
     for raw in lines:
         line = raw.rstrip()
         if not line:
+            html_lines.append("<br/>")
             continue
         escaped = html.escape(line)
         if line.startswith("### "):
@@ -161,10 +162,17 @@ def _write_html_export(summary: FetchSummary, output_dir: Path, index_url: str) 
     html_dir.mkdir(parents=True, exist_ok=True)
 
     links: list[str] = []
+    used_filenames: set[str] = set()
     for idx, r in enumerate(summary.results, start=1):
         if not r.success:
             continue
-        filename = f"{idx:03d}-{_slugify(r.title or Path(r.local_path).stem)}.html"
+        base_filename = f"{idx:03d}-{_slugify(r.title or Path(r.local_path).stem)}"
+        filename = f"{base_filename}.html"
+        counter = 1
+        while filename in used_filenames:
+            counter += 1
+            filename = f"{base_filename}-{counter}.html"
+        used_filenames.add(filename)
         doc_path = html_dir / filename
         page = f"""<!doctype html>
 <html><head><meta charset=\"utf-8\"/><title>{html.escape(r.title or r.url)}</title></head>

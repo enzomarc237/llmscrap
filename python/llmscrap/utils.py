@@ -31,7 +31,7 @@ def is_doc_url(url: str) -> bool:
     if any(path.endswith(ext) for ext in DOC_EXTENSIONS):
         return True
 
-    if "raw.githubusercontent.com" in parsed.netloc and "/raw/" in path:
+    if parsed.netloc.lower() == "raw.githubusercontent.com" and "/raw/" in path:
         return True
 
     return any(f"{ext}" in query for ext in DOC_EXTENSIONS)

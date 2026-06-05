@@ -72,6 +72,14 @@ const defaultPreset: Preset = {
   polite: true,
 };
 
+const getHostLabel = (value: string) => {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return value;
+  }
+};
+
 export function ScrapeForm({ onComplete }: ScrapeFormProps) {
   const [url, setUrl] = useState("");
   const [outputDir, setOutputDir] = useState(defaultPreset.outputDir);
@@ -209,7 +217,7 @@ export function ScrapeForm({ onComplete }: ScrapeFormProps) {
     localStorage.setItem(PRESET_KEY, JSON.stringify(preset));
   };
 
-  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = async (e: React.DragEvent<HTMLFormElement>) => {
     e.preventDefault();
     const uri = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
     if (uri?.trim()) {
@@ -220,7 +228,7 @@ export function ScrapeForm({ onComplete }: ScrapeFormProps) {
     const file = e.dataTransfer.files?.[0];
     if (!file) return;
     const text = await file.text();
-    const firstUrl = text.match(/https?:\/\/\S+/)?.[0];
+    const firstUrl = text.match(/https?:\/\/[^\s)"'>]+/)?.[0];
     if (firstUrl) setUrl(firstUrl);
   };
 
@@ -260,7 +268,7 @@ export function ScrapeForm({ onComplete }: ScrapeFormProps) {
                       setOutputDir(run.outputDir);
                     }}
                   >
-                    {new URL(run.url).hostname}
+                    {getHostLabel(run.url)}
                   </button>
                 ))}
               </div>

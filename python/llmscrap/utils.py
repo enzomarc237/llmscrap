@@ -4,6 +4,8 @@ import logging
 import re
 from urllib.parse import urljoin, urlparse
 
+DOC_EXTENSIONS = (".md", ".mdx", ".txt")
+
 
 def setup_logging(verbose: bool = False) -> logging.Logger:
     level = logging.DEBUG if verbose else logging.INFO
@@ -20,10 +22,24 @@ def resolve_url(base: str, href: str) -> str:
     return urljoin(base, href)
 
 
+def is_doc_url(url: str) -> bool:
+    """Return True if URL targets a supported text doc format."""
+    parsed = urlparse(url)
+    path = parsed.path.lower()
+    query = parsed.query.lower()
+
+    if any(path.endswith(ext) for ext in DOC_EXTENSIONS):
+        return True
+
+    if "raw.githubusercontent.com" in parsed.netloc and "/raw/" in path:
+        return True
+
+    return any(f"{ext}" in query for ext in DOC_EXTENSIONS)
+
+
 def is_md_url(url: str) -> bool:
-    """Return True if the URL path ends with .md."""
-    path = urlparse(url).path
-    return path.endswith(".md")
+    """Backwards-compatible alias for markdown/doc detection."""
+    return is_doc_url(url)
 
 
 def url_to_local_path(url: str, base_url: str) -> str:
@@ -42,7 +58,15 @@ def url_to_local_path(url: str, base_url: str) -> str:
     if base_path and path.startswith(base_path):
         path = path[len(base_path):].lstrip("/")
 
-    return path if path else "index.md"
+    if not path:
+        path = "index.md"
+
+    # Normalize extension for query-string links that still point to markdown-ish files
+    lowered = path.lower()
+    if not any(lowered.endswith(ext) for ext in DOC_EXTENSIONS):
+        path = f"{path}.md"
+
+    return path
 
 
 def sanitize_filename(name: str) -> str:

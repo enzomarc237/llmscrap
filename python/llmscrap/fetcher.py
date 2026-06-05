@@ -4,8 +4,10 @@ fetcher.py: Parallel HTTP downloads with retry logic and progress tracking.
 Progress is written to <output_dir>/.progress.json for Tauri file-watcher.
 """
 
+import hashlib
 import json
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -31,6 +33,8 @@ class DownloadResult:
     error: Optional[str] = None
     size_bytes: int = 0
     content: str = ""
+    sha256: Optional[str] = None
+    duplicate_of: Optional[str] = None
 
 
 @dataclass
@@ -40,10 +44,12 @@ class FetchSummary:
     failed: int
     results: List[DownloadResult] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    cancelled: bool = False
 
 
-def _make_session(retries: int = 3, backoff: float = 0.5) -> requests.Session:
+def _make_session(retries: int = 3, backoff: float = 0.5, user_agent: str = "llmscrap/0.2") -> requests.Session:
     session = requests.Session()
+    session.headers.update({"User-Agent": user_agent})
     retry = Retry(
         total=retries,
         backoff_factor=backoff,
@@ -61,19 +67,25 @@ def _write_progress(
     downloaded: int,
     total: int,
     current_url: str,
+    current_title: str,
     failed: int,
     start_time: float,
 ) -> None:
     elapsed = time.time() - start_time
     speed = downloaded / elapsed if elapsed > 0 else 0
+    remaining = max(total - downloaded, 0)
+    eta = remaining / speed if speed > 0 else None
     progress_file.write_text(
         json.dumps({
             "downloaded": downloaded,
             "total": total,
             "failed": failed,
             "current": current_url,
+            "current_title": current_title,
             "speed_files_per_sec": round(speed, 2),
             "percent": round((downloaded / total * 100) if total else 0, 1),
+            "elapsed_sec": round(elapsed, 1),
+            "eta_sec": round(eta, 1) if eta is not None else None,
         }),
         encoding="utf-8",
     )
@@ -85,26 +97,52 @@ def _download_one(
     output_dir: Path,
     session: requests.Session,
     timeout: int,
+    hash_index: dict[str, str],
+    hash_lock: threading.Lock,
+    request_delay: float,
+    cancel_file: Optional[Path],
 ) -> DownloadResult:
     local_rel = url_to_local_path(link.url, base_url)
     local_path = output_dir / local_rel
 
-    try:
-        resp = session.get(link.url, timeout=timeout)
-        resp.raise_for_status()
-        content = resp.text
-
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        local_path.write_text(content, encoding="utf-8")
-
+    if cancel_file and cancel_file.exists():
         return DownloadResult(
             url=link.url,
             local_path=str(local_rel),
             title=link.title,
             section=link.section,
+            success=False,
+            error="cancelled",
+        )
+
+    try:
+        if request_delay > 0:
+            time.sleep(request_delay)
+
+        resp = session.get(link.url, timeout=timeout)
+        resp.raise_for_status()
+        content = resp.text
+        sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+        with hash_lock:
+            duplicate_of = hash_index.get(sha256)
+            if duplicate_of is None:
+                hash_index[sha256] = str(local_rel)
+
+        if duplicate_of is None:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_text(content, encoding="utf-8")
+
+        return DownloadResult(
+            url=link.url,
+            local_path=str(local_rel if duplicate_of is None else duplicate_of),
+            title=link.title,
+            section=link.section,
             success=True,
             size_bytes=len(content.encode("utf-8")),
             content=content,
+            sha256=sha256,
+            duplicate_of=duplicate_of,
         )
     except Exception as e:
         logger.warning("Failed to download %s: %s", link.url, e)
@@ -125,18 +163,12 @@ def download_docs(
     workers: int = 4,
     timeout: int = 20,
     watch_progress: bool = True,
+    request_delay: float = 0,
+    user_agent: str = "llmscrap/0.2",
+    polite: bool = False,
+    cancel_file: Optional[Path] = None,
 ) -> FetchSummary:
-    """
-    Download all links in parallel.
-
-    Args:
-        links: List of DocLink from parser
-        base_url: The original index URL (used for path mirroring)
-        output_dir: Root directory to save files
-        workers: Number of parallel download threads
-        timeout: Per-request timeout in seconds
-        watch_progress: Write .progress.json to output_dir if True
-    """
+    """Download all links in parallel."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -146,12 +178,29 @@ def download_docs(
     failed = 0
     start_time = time.time()
     results: List[DownloadResult] = []
+    errors: List[str] = []
 
-    session = _make_session()
+    if polite and request_delay <= 0:
+        request_delay = 0.35
+
+    session = _make_session(user_agent=user_agent)
+    hash_index: dict[str, str] = {}
+    hash_lock = threading.Lock()
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(_download_one, link, base_url, output_dir, session, timeout): link
+            executor.submit(
+                _download_one,
+                link,
+                base_url,
+                output_dir,
+                session,
+                timeout,
+                hash_index,
+                hash_lock,
+                request_delay,
+                cancel_file,
+            ): link
             for link in links
         }
 
@@ -164,20 +213,32 @@ def download_docs(
                 logger.debug("✓ %s", result.local_path)
             else:
                 failed += 1
+                if result.error:
+                    errors.append(f"{result.url}: {result.error}")
                 logger.warning("✗ %s — %s", result.url, result.error)
 
             if watch_progress:
                 _write_progress(
-                    progress_file, downloaded, total, result.url, failed, start_time
+                    progress_file,
+                    downloaded,
+                    total,
+                    result.url,
+                    result.title,
+                    failed,
+                    start_time,
                 )
+
+    cancelled = bool(cancel_file and cancel_file.exists())
 
     # Write final progress state
     if watch_progress:
-        _write_progress(progress_file, downloaded, total, "", failed, start_time)
+        _write_progress(progress_file, downloaded, total, "", "", failed, start_time)
 
     return FetchSummary(
         total=total,
         downloaded=downloaded,
         failed=failed,
         results=results,
+        errors=errors,
+        cancelled=cancelled,
     )

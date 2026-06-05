@@ -6,8 +6,11 @@ export interface Progress {
   total: number;
   failed: number;
   current: string;
+  current_title?: string;
   speed_files_per_sec: number;
   percent: number;
+  elapsed_sec?: number;
+  eta_sec?: number | null;
 }
 
 /** Poll .progress.json from `outputDir` every `intervalMs` while `active` is true. */

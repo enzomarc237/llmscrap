@@ -1,12 +1,10 @@
 """Tests for fetcher.py"""
 import json
-from pathlib import Path
 
-import pytest
 import responses
 
 from llmscrap.parser import DocLink
-from llmscrap.fetcher import download_docs, FetchSummary
+from llmscrap.fetcher import download_docs
 
 
 BASE_URL = "https://docs.example.com/llms.txt"
@@ -61,13 +59,13 @@ def test_download_writes_progress_file(tmp_path):
     progress_file = tmp_path / ".progress.json"
     assert progress_file.exists()
     data = json.loads(progress_file.read_text())
-    assert "downloaded" in data
-    assert "total" in data
+    assert "elapsed_sec" in data
+    assert "eta_sec" in data
     assert data["total"] == 2
 
 
 @responses.activate
-def test_download_result_has_content(tmp_path):
+def test_download_result_has_content_and_sha(tmp_path):
     responses.add(responses.GET, LINKS[0].url, body="# Intro Content", status=200)
     responses.add(responses.GET, LINKS[1].url, body="# Auth Content", status=200)
 
@@ -76,3 +74,16 @@ def test_download_result_has_content(tmp_path):
     intro = next(r for r in summary.results if "intro.md" in r.url)
     assert intro.content == "# Intro Content"
     assert intro.size_bytes > 0
+    assert intro.sha256
+
+
+@responses.activate
+def test_download_deduplicates_files(tmp_path):
+    same = "# Same content"
+    responses.add(responses.GET, LINKS[0].url, body=same, status=200)
+    responses.add(responses.GET, LINKS[1].url, body=same, status=200)
+
+    summary = download_docs(LINKS, BASE_URL, tmp_path, workers=2, watch_progress=False)
+
+    deduped = [r for r in summary.results if r.duplicate_of]
+    assert len(deduped) == 1
